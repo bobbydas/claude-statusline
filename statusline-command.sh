@@ -8,6 +8,7 @@ used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
 cost=$(echo "$input" | jq -r '.cost.total_cost_usd // empty')
 tool=$(echo "$input" | jq -r '.current_tool // empty')
 rate_resets=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
+rate_used=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
 
 SEP="\033[2m  |  \033[0m"
 
@@ -40,7 +41,7 @@ if [ -n "$used" ]; then
   else
     ctx_color="\033[0;32m"
   fi
-  ctx_part="${SEP}${ctx_color}Context Remaining: ${remaining}%\033[0m"
+  ctx_part="${SEP}${ctx_color}Context ${remaining}%\033[0m"
 fi
 
 # Session cost
@@ -50,13 +51,22 @@ if [ -n "$cost" ]; then
   cost_part="${SEP}\033[0;36m\$${cost_fmt}\033[0m"
 fi
 
-# Session time remaining (5h rate-limit window)
-session_part=""
-if [ -n "$rate_resets" ]; then
-  now=$(date -u +%s)
-  reset_epoch="$rate_resets"
-  if [ -n "$reset_epoch" ]; then
-    diff=$((reset_epoch - now))
+# 5h window usage + reset timer (combined, no separator between them)
+window_part=""
+if [ -n "$rate_used" ]; then
+  rate_int=$(printf "%.0f" "$rate_used")
+  if [ "$rate_int" -ge 80 ]; then
+    rate_color="\033[0;31m"
+  elif [ "$rate_int" -ge 50 ]; then
+    rate_color="\033[0;33m"
+  else
+    rate_color="\033[0;32m"
+  fi
+  window_part="${SEP}${rate_color}% Usage ${rate_int}%\033[0m"
+
+  if [ -n "$rate_resets" ]; then
+    now=$(date -u +%s)
+    diff=$((rate_resets - now))
     if [ "$diff" -gt 0 ]; then
       hrs=$((diff / 3600))
       mins=$(((diff % 3600) / 60))
@@ -67,8 +77,8 @@ if [ -n "$rate_resets" ]; then
       else
         sess_color="\033[0;32m"
       fi
-      reset_ist=$(TZ=Asia/Kolkata date -r "$reset_epoch" '+%H:%M IST' 2>/dev/null)
-      session_part="${SEP}${sess_color}⏱ ${hrs}h ${mins}m${reset_ist:+ (resets ${reset_ist})}\033[0m"
+      reset_time=$(TZ=Asia/Kolkata date -r "$rate_resets" '+%H:%M' 2>/dev/null)
+      window_part="${window_part}  ${sess_color}⏱ ${hrs}h ${mins}m${reset_time:+ (resets ${reset_time})}\033[0m"
     fi
   fi
 fi
@@ -79,10 +89,7 @@ if [ -n "$tool" ]; then
   tool_part="${SEP}\033[0;33m⚙ ${tool}\033[0m"
 fi
 
-# Times: IST | PT
-ist=$(TZ=Asia/Kolkata date '+%H:%M IST')
-pt=$(TZ=America/Los_Angeles date '+%H:%M PT')
-time_part="${SEP}\033[2m${ist}  ${pt}\033[0m"
+time_part=""
 
 # Build status line
 dir_seg="\033[0;34m${dir}\033[0m"
@@ -90,7 +97,7 @@ model_seg="\033[2m${model}\033[0m"
 
 if [ -n "$branch" ]; then
   branch_seg="\033[0;35m⎇ ${branch}\033[0m"
-  printf "%b" "${dir_seg}${SEP}${branch_seg}${SEP}${model_seg}${ctx_part}${cost_part}${session_part}${tool_part}${time_part}"
+  printf "%b" "${dir_seg}${SEP}${branch_seg}${SEP}${model_seg}${ctx_part}${window_part}${cost_part}${tool_part}${time_part}"
 else
-  printf "%b" "${dir_seg}${SEP}${model_seg}${ctx_part}${cost_part}${session_part}${tool_part}${time_part}"
+  printf "%b" "${dir_seg}${SEP}${model_seg}${ctx_part}${window_part}${cost_part}${tool_part}${time_part}"
 fi
